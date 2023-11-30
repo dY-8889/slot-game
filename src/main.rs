@@ -5,6 +5,7 @@ use rand::{seq::SliceRandom, thread_rng};
 use ItemKind::*;
 
 type Sound = Handle<AudioSource>;
+type ItemEqList = [ItemKind; 3];
 
 const ITEM_SPEED: f32 = 20.0;
 // アイテムのサイズ
@@ -43,7 +44,7 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
-                resolution: (1100., 900.).into(),
+                resolution: (1100., 1000.).into(),
                 ..default()
             }),
             ..default()
@@ -62,8 +63,6 @@ fn main() {
         .add_systems(Update, (item_move, item_stop))
         .run();
 }
-
-type ItemEqList = [ItemKind; 3];
 
 #[derive(Resource, Debug, Default)]
 struct ItemEq {
@@ -155,10 +154,13 @@ impl ItemEq {
     const ITEM_EQ: [(usize, usize, usize); 2] = [(0, 1, 2), (2, 1, 0)];
 
     fn eq(&self) -> bool {
-        for (i, is) in (0..=2).zip(Self::ITEM_EQ.iter()) {
-            if (self.item1[i] == self.item2[i] && self.item2[i] == self.item3[i])
-                || (self.item1[is.0] == self.item2[is.1] && self.item2[is.1] == self.item3[is.2])
-            {
+        for i in 0..=2 {
+            if self.item1[i] == self.item2[i] && self.item2[i] == self.item3[i] {
+                return true;
+            }
+        }
+        for is in Self::ITEM_EQ {
+            if self.item1[is.0] == self.item2[is.1] && self.item2[is.1] == self.item3[is.2] {
                 return true;
             }
         }
@@ -192,7 +194,7 @@ impl ItemMoveFlag {
         };
         *flag = false;
     }
-    fn get_location(&self, location: usize) -> bool {
+    fn get(&self, location: usize) -> bool {
         match location {
             1 => self.item1,
             2 => self.item2,
@@ -355,7 +357,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
 
 fn item_move(mut item_query: Query<(&mut Transform, &ItemLocation)>, move_flag: Res<ItemMoveFlag>) {
     for (mut transform, item) in &mut item_query {
-        if move_flag.get_location(item.0) {
+        if move_flag.get(item.0) {
             if transform.translation.y <= ITEM_DESPAWN_POINT {
                 transform.translation.y = ITEM_SPAWN_POINT
             }
@@ -370,15 +372,15 @@ fn keyboard_input(
     mut item_eq: ResMut<ItemEq>,
     mut item_stop_event: EventWriter<ItemStopEvent>,
 ) {
-    if key.just_pressed(KeyCode::J) {
+    if key.just_pressed(KeyCode::J) && move_flag.get(1) {
         item_stop_event.send(ItemStopEvent(1));
         move_flag.change(1)
     }
-    if key.just_pressed(KeyCode::K) {
+    if key.just_pressed(KeyCode::K) && move_flag.get(2) {
         item_stop_event.send(ItemStopEvent(2));
         move_flag.change(2)
     }
-    if key.just_pressed(KeyCode::L) {
+    if key.just_pressed(KeyCode::L) && move_flag.get(3) {
         item_stop_event.send(ItemStopEvent(3));
         move_flag.change(3)
     }
@@ -400,7 +402,7 @@ fn button_system(
         match *interaction {
             Interaction::Pressed => {
                 // アイテムを止める時時の処理
-                if move_flag.get_location(button_id.0) {
+                if move_flag.get(button_id.0) {
                     item_stop_event.send(ItemStopEvent(button_id.0));
                 }
 
@@ -459,6 +461,7 @@ fn item_stop(
             }
         }
         item_eq.change(stop, eq_kinds);
+        println!("{:?}", eq_kinds);
 
         if item_eq.eq() {
             sound_event.send(SoundEvent(Audio::Arrange))
