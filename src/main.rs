@@ -150,10 +150,12 @@ struct ItemBundle {
     id: ItemLocation,
     kind: ItemKind,
 }
-const ITEM_EQ: [(usize, usize, usize); 2] = [(0, 1, 2), (2, 1, 0)];
+
 impl ItemEq {
+    const ITEM_EQ: [(usize, usize, usize); 2] = [(0, 1, 2), (2, 1, 0)];
+
     fn eq(&self) -> bool {
-        for (i, is) in (0..=2).zip(ITEM_EQ.iter()) {
+        for (i, is) in (0..=2).zip(Self::ITEM_EQ.iter()) {
             if (self.item1[i] == self.item2[i] && self.item2[i] == self.item3[i])
                 || (self.item1[is.0] == self.item2[is.1] && self.item2[is.1] == self.item3[is.2])
             {
