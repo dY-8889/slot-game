@@ -4,6 +4,8 @@ use rand::{seq::SliceRandom, thread_rng};
 
 use ItemKind::*;
 
+type Sound = Handle<AudioSource>;
+
 const ITEM_SPEED: f32 = 20.0;
 // アイテムのサイズ
 const ITEM_SCALE: Vec2 = Vec2::new(200.0, 200.0);
@@ -13,7 +15,7 @@ const ITEM_LOCATIONS: [f32; 3] = [-230., 0., 230.];
 const ITEM_LIST: [ItemKind; 5] = [Apple, Mikan, Grape, Banana, Pine];
 
 // アイテム同士の余白
-const ITEM_PADDING: f32 = 17.0;
+const ITEM_PADDING: f32 = 20.0;
 // アイテムがスポーンする座標
 const ITEM_SPAWN_POINT: f32 = (ITEM_SCALE.y + ITEM_PADDING) * 2.0;
 // アイテムがデスポーンする場所
@@ -21,6 +23,8 @@ const ITEM_DESPAWN_POINT: f32 =
     -((ITEM_SCALE.y + ITEM_PADDING) * ITEM_LIST.len() as f32) + ITEM_SPAWN_POINT;
 
 const Y_RANGE: f32 = (ITEM_SCALE.y + ITEM_PADDING) / 1.5;
+const TOP_RANGE: (f32, f32) = (Y_RANGE, Y_RANGE + ITEM_SCALE.y);
+const BOTTOM_RANGE: (f32, f32) = (-Y_RANGE - ITEM_SCALE.y, -Y_RANGE);
 
 // ボタンのサイズ
 const BUTTON_WIDTH: Val = Val::Px(140.0);
@@ -59,11 +63,13 @@ fn main() {
         .run();
 }
 
-#[derive(Resource, Default, Debug)]
+type ItemEqList = [ItemKind; 3];
+
+#[derive(Resource, Debug, Default)]
 struct ItemEq {
-    item1: Option<ItemKind>,
-    item2: Option<ItemKind>,
-    item3: Option<ItemKind>,
+    item1: ItemEqList,
+    item2: ItemEqList,
+    item3: ItemEqList,
 }
 
 #[derive(Resource, Default)]
@@ -73,13 +79,15 @@ struct ItemMoveFlag {
     item3: bool,
 }
 
-#[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Component, Clone, Copy, PartialEq, Eq, Debug, Default)]
 enum ItemKind {
     Apple,
     Mikan,
     Grape,
     Banana,
     Pine,
+    #[default]
+    Null,
 }
 
 enum FrameLocation {
@@ -101,8 +109,6 @@ struct StopButton(usize);
 #[derive(Event, Default)]
 struct ItemStopEvent(usize);
 
-type Sound = Handle<AudioSource>;
-
 #[derive(Resource)]
 struct Sounds {
     eq: Sound,
@@ -110,7 +116,7 @@ struct Sounds {
 }
 
 impl Sounds {
-    fn get(&self, audio: &Audio) -> Handle<AudioSource> {
+    fn get(&self, audio: &Audio) -> Sound {
         let sound = match audio {
             Audio::Arrange => &self.eq,
             Audio::Stop => &self.stop,
@@ -144,15 +150,19 @@ struct ItemBundle {
     id: ItemLocation,
     kind: ItemKind,
 }
-
+const ITEM_EQ: [(usize, usize, usize); 2] = [(0, 1, 2), (2, 1, 0)];
 impl ItemEq {
     fn eq(&self) -> bool {
-        if self.item1 == self.item2 && self.item2 == self.item3 {
-            return true;
+        for (i, is) in (0..=2).zip(ITEM_EQ.iter()) {
+            if (self.item1[i] == self.item2[i] && self.item2[i] == self.item3[i])
+                || (self.item1[is.0] == self.item2[is.1] && self.item2[is.1] == self.item3[is.2])
+            {
+                return true;
+            }
         }
         false
     }
-    fn change(&mut self, location: usize, kind: ItemKind) {
+    fn change(&mut self, location: usize, kinds: [ItemKind; 3]) {
         let item = match location {
             1 => &mut self.item1,
             2 => &mut self.item2,
@@ -160,12 +170,13 @@ impl ItemEq {
             _ => panic!(),
         };
 
-        *item = Some(kind);
+        *item = kinds
     }
     fn reset(&mut self) {
-        self.item1 = None;
-        self.item2 = None;
-        self.item3 = None;
+        let item = [Null, Null, Null];
+        self.item1 = item;
+        self.item2 = item;
+        self.item3 = item;
     }
 }
 
@@ -202,6 +213,7 @@ impl ItemKind {
             Grape => "budou.png",
             Banana => "banana.png",
             Pine => "pine.png",
+            Null => panic!(),
         };
         "images/".to_string() + str
     }
@@ -212,6 +224,7 @@ impl ItemKind {
             Grape => Vec2::new(1., 1.),
             Banana => Vec2::new(1., 1.),
             Pine => Vec2::new(1., 1.),
+            Null => panic!(),
         }
     }
 }
@@ -411,6 +424,7 @@ fn item_stop(
         let stop = stop_location.0;
         // どれくらいずらすか
         let mut difference: f32 = 0.0;
+        let mut eq_kinds: [ItemKind; 3] = [Null, Null, Null];
 
         for (transform, location, kind) in &item_query {
             // 押した行といま取得しているアイテムが同じ行にあるか
@@ -420,13 +434,7 @@ fn item_stop(
 
                 // あいてむが指定した範囲にあったら
                 if -Y_RANGE <= y && y <= Y_RANGE {
-                    item_eq.change(stop, *kind);
-
-                    if item_eq.eq() {
-                        sound_event.send(SoundEvent(Audio::Arrange));
-                    } else {
-                        sound_event.send(SoundEvent(Audio::Stop));
-                    }
+                    eq_kinds[1] = *kind;
 
                     difference = y;
 
@@ -434,11 +442,26 @@ fn item_stop(
                 }
             }
         }
-        for (mut transform, location, _) in &mut item_query {
+        for (mut transform, location, kind) in &mut item_query {
             if stop == location.0 {
                 // ずらす
                 transform.translation.y -= difference;
+
+                let y = transform.translation.y;
+                if TOP_RANGE.0 <= y && y <= TOP_RANGE.1 {
+                    eq_kinds[0] = *kind
+                }
+                if BOTTOM_RANGE.0 <= y && y <= BOTTOM_RANGE.1 {
+                    eq_kinds[2] = *kind
+                }
             }
+        }
+        item_eq.change(stop, eq_kinds);
+
+        if item_eq.eq() {
+            sound_event.send(SoundEvent(Audio::Arrange))
+        } else {
+            sound_event.send(SoundEvent(Audio::Stop))
         }
     }
 }
