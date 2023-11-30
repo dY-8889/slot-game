@@ -461,7 +461,6 @@ fn item_stop(
             }
         }
         item_eq.change(stop, eq_kinds);
-        println!("{:?}", eq_kinds);
 
         if item_eq.eq() {
             sound_event.send(SoundEvent(Audio::Arrange))
